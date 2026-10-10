@@ -1,0 +1,17 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#0a1226"><meta name="description" content="Zip photos, videos and documents into one ZIP file, privately on your device."><title>Zip Files · Drevia Infotech</title><link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="app.css"></head><body><main id="app"></main><script src="connection.js"></script><script src="app.js"></script><script>const $=App.$;
+const uniq=(name,used)=>{if(!used.has(name)){used.add(name);return name}const d=name.lastIndexOf('.'),b=d>0?name.slice(0,d):name,e=d>0?name.slice(d):'';let n=2,c;do{c=b+' ('+n++ +')'+e}while(used.has(c));used.add(c);return c};
+App.init({title:'Zip Files',sub:'Combine photos, videos and documents into one ZIP file. Files stay on your device — nothing is uploaded.',
+hint:'Photos, videos, PDFs and any other files',accept:'',multiple:true,test:()=>true,action:'Create ZIP',
+options:`<label>ZIP file name<input id="zname" value="my-files" autocomplete="off"></label>
+<label>Compression<select id="cmp"><option value="STORE">Fast — best for photos &amp; videos</option><option value="DEFLATE">Smaller — best for documents</option></select></label>`,
+note:'Photos and videos are already compressed, so a ZIP of them is about the same size as the originals. Very large totals (over about 1.5 GB) may fail on phones — split them into smaller ZIPs.',
+run:async(files,{progress,status})=>{
+  await App.lib('jszip');
+  const zip=new JSZip(),used=new Set();status('Creating ZIP…');
+  files.forEach(f=>zip.file(uniq(f.name,used),f,{binary:true}));
+  const deflate=$('cmp').value==='DEFLATE';
+  const blob=await zip.generateAsync({type:'blob',compression:deflate?'DEFLATE':'STORE',compressionOptions:{level:6},streamFiles:true},m=>progress(m.percent));
+  const name=App.safe($('zname').value,'my-files')+'.zip';
+  return{blob:new Blob([blob],{type:'application/zip'}),name,summary:'ZIP ready — '+name+' ('+App.fmt(blob.size)+')'};
+}});
+</script></body></html>

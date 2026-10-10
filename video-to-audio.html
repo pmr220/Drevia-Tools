@@ -1,0 +1,65 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#0a1226"><meta name="description" content="Extract MP3, WAV or M4A audio from any video, fast and private."><title>Video to Audio · Drevia Infotech</title><link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="app.css"></head><body><main id="app"></main><script src="connection.js"></script><script src="app.js"></script><script>const $=App.$;
+const decodeAudio=ab=>new Promise((ok,no)=>{const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return no(new Error('no audio'));const c=new AC();c.decodeAudioData(ab,b=>{c.close();ok(b)},e=>{c.close();no(e||new Error('decode'))})});
+/* Fast path: the browser's own decoder + a small MP3/WAV encoder */
+async function fast(f,fm,kbps,st,len,{status,progress}){
+  status('Reading the sound from your video…');progress(5);
+  const buf=await decodeAudio(await f.arrayBuffer());
+  const sr=buf.sampleRate,ch=Math.min(2,buf.numberOfChannels),a=Math.max(0,Math.floor((st||0)*sr)),b=len>0?Math.min(buf.length,a+Math.floor(len*sr)):buf.length;
+  if(b<=a)throw new Error('The start time is past the end of the video.');
+  const n=b-a,pcm=[];
+  for(let c=0;c<ch;c++){const s=buf.getChannelData(c).subarray(a,b),o=new Int16Array(n);for(let i=0;i<n;i++){const v=s[i];o[i]=(v<-1?-1:v>1?1:v)*32767}pcm.push(o)}
+  if(fm==='wav'){
+    const d=new Int16Array(n*ch);for(let i=0;i<n;i++)for(let c=0;c<ch;c++)d[i*ch+c]=pcm[c][i];
+    const h=new DataView(new ArrayBuffer(44)),w=(o,s)=>[...s].forEach((k,i)=>h.setUint8(o+i,k.charCodeAt(0)));
+    w(0,'RIFF');h.setUint32(4,36+d.byteLength,true);w(8,'WAVEfmt ');h.setUint32(16,16,true);h.setUint16(20,1,true);h.setUint16(22,ch,true);
+    h.setUint32(24,sr,true);h.setUint32(28,sr*ch*2,true);h.setUint16(32,ch*2,true);h.setUint16(34,16,true);w(36,'data');h.setUint32(40,d.byteLength,true);
+    return new Blob([h,d],{type:'audio/wav'});
+  }
+  status('Making your MP3…');await App.lib('lame');
+  const enc=new lamejs.Mp3Encoder(ch,sr,kbps),parts=[],B=1152*16;
+  for(let i=0;i<n;i+=B){
+    const l=pcm[0].subarray(i,i+B),o=ch>1?enc.encodeBuffer(l,pcm[1].subarray(i,i+B)):enc.encodeBuffer(l);
+    if(o.length)parts.push(o);
+    if((i/B)%8===0){progress(15+i/n*83);await App.tick()}
+  }
+  const e=enc.flush();if(e.length)parts.push(e);
+  return new Blob(parts,{type:'audio/mpeg'});
+}
+/* Backup path: full video engine (needed for M4A and unusual files) */
+async function engine(f,fm,br,st,len,{status,progress}){
+  const ff=await App.ffmpeg(status),{fetchFile}=FFmpegUtil;
+  const inName='input.'+(App.ext(f.name)||'mp4'),outName='out.'+fm,trim=[...(st>0?['-ss',''+st]:[]),...(len>0?['-t',''+len]:[])];
+  const onP=({progress:p})=>progress(p*100);ff.on('progress',onP);status('Extracting audio…');progress(1);
+  try{
+    await ff.writeFile(inName,await fetchFile(f));
+    let code;
+    if(fm==='m4a'){
+      code=await ff.exec([...trim,'-i',inName,'-vn','-c:a','copy','-y',outName]);   /* instant: no re-encoding */
+      if(code!==0)code=await ff.exec([...trim,'-i',inName,'-vn','-c:a','aac','-b:a',br+'k','-y',outName]);
+    }else{
+      const codec={mp3:['-c:a','libmp3lame','-b:a',br+'k'],wav:['-c:a','pcm_s16le']}[fm];
+      code=await ff.exec([...trim,'-i',inName,'-vn',...codec,'-y',outName]);
+    }
+    if(code!==0)throw new Error('Could not extract audio. The video may have no sound track.');
+    const d=await ff.readFile(outName);await ff.deleteFile(inName).catch(()=>{});await ff.deleteFile(outName).catch(()=>{});
+    return new Blob([d.buffer],{type:{mp3:'audio/mpeg',m4a:'audio/mp4',wav:'audio/wav'}[fm]});
+  }finally{ff.off('progress',onP)}
+}
+App.init({title:'Video to Audio',
+sub:'Pull the sound out of any video as MP3, WAV or M4A — lectures, songs, interviews, voice notes. Trim it if you only need a part. Nothing is uploaded.',
+hint:'MP4, MOV, MKV, WebM video',accept:'video/*,.mp4,.mov,.m4v,.mkv,.webm,.avi,.3gp',multiple:false,
+test:f=>f.type.startsWith('video/')||/\.(mp4|mov|m4v|mkv|webm|avi|3gp)$/i.test(f.name),action:'Extract audio',
+options:`<label>Download as<select id="afmt"><option value="mp3">MP3 — works everywhere</option><option value="m4a">M4A — iPhone / Apple</option><option value="wav">WAV — uncompressed, large</option></select></label>
+<label>Quality<select id="abr"><option value="128">Good (128 kbps)</option><option value="192" selected>High (192 kbps)</option><option value="320">Best (320 kbps)</option></select></label>
+<label>Start at (seconds, optional)<input id="start" type="number" inputmode="decimal" min="0" placeholder="0"></label>
+<label>Length (seconds, optional)<input id="len" type="number" inputmode="decimal" min="1" placeholder="whole video"></label>`,
+note:'MP3 and WAV are made instantly with your browser\'s own decoder. M4A and unusual video types use a bigger engine that downloads once and can take longer. Keep videos under about 500 MB. Quality does not apply to WAV.',
+run:async(files,ctx)=>{
+  const f=files[0],fm=$('afmt').value,br=$('abr').value,st=parseFloat($('start').value)||0,len=parseFloat($('len').value)||0;
+  if(f.size>500*1048576)throw new Error('This video is over 500 MB — too large for the browser. Try a smaller file.');
+  let blob=null,how='';
+  if(fm!=='m4a'&&f.size<=400*1048576){try{blob=await fast(f,fm,+br,st,len,ctx);how='instant'}catch(e){console.warn('fast path failed',e)}}
+  if(!blob){blob=await engine(f,fm,br,st,len,ctx)}
+  return{blob,name:App.base(f.name)+'.'+fm,summary:fm.toUpperCase()+' · '+App.fmt(blob.size)+' — preview below, then save.'};
+}});
+</script></body></html>

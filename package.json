@@ -1,0 +1,31 @@
+{
+  "name": "drevia-infotech-everyday-tools",
+  "version": "3.1.0",
+  "private": true,
+  "description": "Drevia Infotech's database-free everyday tools suite with an in-memory Node.js API.",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "check": "node scripts/check.js",
+    "postinstall": "node scripts/copy-assets.js",
+    "build:assets": "node scripts/copy-assets.js",
+    "test": "node --test --test-isolation=none tests/*.test.js"
+  },
+  "dependencies": {
+    "compression": "^1.8.0",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
+    "multer": "^2.0.0",
+    "qrcode": "^1.5.4",
+    "tesseract.js": "^6.0.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

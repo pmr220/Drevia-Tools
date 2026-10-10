@@ -1,0 +1,1 @@
+Start here: extract the entire ZIP, install Node.js 22+, double-click START-WINDOWS.cmd, keep the window open, and visit http://localhost:3000. Read README.md for hosting and troubleshooting. Do not open index.html directly.

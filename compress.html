@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a1226"><meta name="description" content="Compress photos, videos, PDFs and ZIPs to a size you choose, in the format you want.">
+<title>Compress Files · Drevia Infotech</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="app.css">
+</head>
+<body>
+<main id="app" class="tool">
+
+  <div class="opt">
+    <label for="target">Target size</label>
+    <select id="target">
+      <option value="0.1" selected>10% of original</option>
+      <option value="0.25">25% of original</option>
+      <option value="0.5">50% of original</option>
+      <option value="custom">Exact size…</option>
+    </select>
+    <input id="custom" type="number" min="1" placeholder="KB" hidden style="width:110px;font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px">
+  </div>
+  <div class="opt">
+    <label for="fmt">Download as</label>
+    <select id="fmt" disabled><option>Choose a file first</option></select>
+  </div>
+
+  <label id="drop" for="file">
+    <strong>Tap to choose one file, or drop it here</strong>
+    <span>Image, video, PDF, ZIP or any other file</span>
+    <input id="file" type="file">
+  </label>
+
+  <div id="chosen" class="detail" hidden></div>
+  <button id="go" class="primary" style="margin-top:12px" hidden>Compress</button>
+  <progress id="prog" max="100" hidden></progress>
+  <div id="status" role="status" aria-live="polite"></div>
+
+  <section id="work" hidden>
+    <div class="compare">
+      <div class="box"><div id="prevBefore"></div><h2>Original</h2><p id="szBefore"></p></div>
+      <div class="box"><div id="prevAfter"></div><h2>Compressed</h2><p id="szAfter"></p></div>
+    </div>
+    <div class="summary" id="summary"></div>
+    <p class="detail" id="detail"></p>
+    <div class="actions">
+      <button id="save" class="primary">Save compressed file</button>
+      <button id="alt">Download (other way)</button>
+      <button id="again">Compress another</button>
+    </div>
+    <p class="note" id="iosHelp" hidden>iPhone: tap Save, then choose <b>Save to Files</b> (or <b>Save Image</b> / <b>Save Video</b> to put it in Photos).</p>
+  </section>
+
+  <p class="note">
+    Photos and videos are re-encoded at lower quality and size. PDFs are rebuilt from page images, so text can no longer be selected.
+    ZIPs and other files are only recompressed losslessly, so already-compressed files may not reach the target.
+    Videos are processed on your device and can be slow on phones, so keep them under about 300 MB.
+  </p>
+</main>
+
+<script src="connection.js"></script><script src="app.js"></script>
+<script>
+App.$("app").insertAdjacentHTML("beforebegin", App.hero("Compress Files", "Shrink one file at a time — photos, videos, PDFs, ZIPs and more — to a size you choose, and download it in the format you want. Nothing is uploaded."));
+(() => {
+  const $ = id => document.getElementById(id);
+  const input = $('file'), drop = $('drop'), prog = $('prog'), statusEl = $('status'), work = $('work');
+  const summary = $('summary'), detail = $('detail'), iosHelp = $('iosHelp');
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const MAX_SIDE = 4096;
+  let urls = [], outBlob = null, outName = 'compressed', busy = false;
+
+  const fmt = n => n < 1048576 ? (n/1024).toFixed(0)+' KB' : n < 1073741824 ? (n/1048576).toFixed(2)+' MB' : (n/1073741824).toFixed(2)+' GB';
+  const setStatus = (t, cls='') => { statusEl.textContent = t; statusEl.className = cls; };
+  const setProg = v => { prog.hidden = false; prog.value = Math.max(0, Math.min(100, v)); };
+  const tick = () => new Promise(r => setTimeout(r, 0));
+  const track = u => { urls.push(u); return u; };
+  const ext = n => (n.match(/\.([^.]+)$/) || [,''])[1].toLowerCase();
+  const base = n => n.replace(/\.[^.]+$/, '');
+
+  
+  function kindOf(f){
+    const e = ext(f.name);
+    if (f.type.startsWith('image/') || ['heic','heif','jpg','jpeg','png','webp','bmp','gif'].includes(e)) return 'image';
+    if (f.type.startsWith('video/') || ['mp4','mov','m4v','mkv','webm','avi','3gp'].includes(e)) return 'video';
+    if (f.type === 'application/pdf' || e === 'pdf') return 'pdf';
+    if (f.type === 'application/zip' || e === 'zip') return 'zip';
+    return 'other';
+  }
+
+  /* ---------- IMAGE ---------- */
+  let MIME = 'image/jpeg';
+  const toBlob = (c, q) => new Promise(res => c.toBlob(res, MIME, q));
+  function loadImage(file){
+    return new Promise((resolve, reject) => {
+      const u = URL.createObjectURL(file), im = new Image();
+      im.onload = () => { URL.revokeObjectURL(u); resolve(im); };
+      im.onerror = () => { URL.revokeObjectURL(u); reject(new Error('decode')); };
+      im.src = u;
+    });
+  }
+  function drawScaled(im, scale){
+    const w = Math.max(1, Math.round(im.naturalWidth * scale)), h = Math.max(1, Math.round(im.naturalHeight * scale));
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); ctx.drawImage(im, 0, 0, w, h);
+    return c;
+  }
+  async function doImage(file, goal, fm){
+    MIME = { jpg: 'image/jpeg', webp: 'image/webp', png: 'image/png' }[fm] || 'image/jpeg';
+    const im = await loadImage(file);
+    let scale = Math.min(1, MAX_SIDE / Math.max(im.naturalWidth, im.naturalHeight)), best = null;
+    for (let round = 0; round < 12; round++){
+      const c = drawScaled(im, scale); setProg(5 + round * 7); await tick();
+      const lowest = await toBlob(c, 0.1);
+      if (!lowest) throw new Error('encode');
+      if (lowest.type !== MIME) throw new Error('This browser cannot save ' + fm.toUpperCase() + ' files. Choose JPG instead.');
+      best = lowest;
+      if (lowest.size > goal){ scale *= 0.8; continue; }
+      let lo = 0.1, hi = 0.95;
+      for (let i = 0; i < 7; i++){
+        const mid = (lo + hi) / 2, b = await toBlob(c, mid);
+        if (b && b.size <= goal){ best = b; lo = mid; } else hi = mid;
+      }
+      break;
+    }
+    return { blob: best, name: base(file.name) + '-compressed.' + fm };
+  }
+
+  /* ---------- PDF (pages -> JPEG -> new PDF) ---------- */
+  async function doPdf(file, goal, fm){
+    setStatus('Loading PDF tools…');
+    const pdfSrc = await App.lib('pdfjs');
+    await App.lib('jspdf');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = pdfSrc.replace('pdf.min.js', 'pdf.worker.min.js');
+    const { jsPDF } = window.jspdf;
+    const asZip = fm === 'jpgzip';
+    if (asZip) await App.lib('jszip');
+    const pdf = await pdfjsLib.getDocument({ isEvalSupported:false, data: await file.arrayBuffer() }).promise;
+    const tries = [[1.5,0.7],[1.2,0.55],[1.0,0.45],[0.8,0.35],[0.65,0.3],[0.5,0.25]];
+    let best = null;
+    for (let t = 0; t < tries.length; t++){
+      const [scale, q] = tries[t];
+      setStatus('Compressing PDF (attempt ' + (t+1) + ' of ' + tries.length + ')…');
+      let doc = null, zf = asZip ? new JSZip() : null;
+      for (let p = 1; p <= pdf.numPages; p++){
+        const page = await pdf.getPage(p);
+        const vp1 = page.getViewport({ scale: 1 }), vp = page.getViewport({ scale });
+        const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+        const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+        await page.render({ canvasContext: ctx, viewport: vp }).promise;
+        const data = c.toDataURL('image/jpeg', q);
+        if (asZip) zf.file('page-' + String(p).padStart(3, '0') + '.jpg', data.split(',')[1], { base64: true });
+        else {
+          const orient = vp1.width > vp1.height ? 'l' : 'p';
+          if (!doc) doc = new jsPDF({ orientation: orient, unit: 'pt', format: [vp1.width, vp1.height], compress: true });
+          else doc.addPage([vp1.width, vp1.height], orient);
+          doc.addImage(data, 'JPEG', 0, 0, vp1.width, vp1.height);
+        }
+        c.width = c.height = 0;
+        setProg(((t + p / pdf.numPages) / tries.length) * 100);
+        await tick();
+      }
+      const blob = asZip ? await zf.generateAsync({ type: 'blob', compression: 'STORE' }) : doc.output('blob');
+      if (!best || blob.size < best.size) best = blob;
+      if (blob.size <= goal) break;
+    }
+    return { blob: best, name: base(file.name) + (asZip ? '-pages.zip' : '-compressed.pdf') };
+  }
+
+  /* ---------- VIDEO (ffmpeg.wasm) ---------- */
+  const loadFFmpeg = () => App.ffmpeg(setStatus);
+    function getDuration(file){
+    return new Promise(res => {
+      const v = document.createElement('video'), u = URL.createObjectURL(file);
+      const done = d => { URL.revokeObjectURL(u); res(d); };
+      v.preload = 'metadata';
+      v.onloadedmetadata = () => done(isFinite(v.duration) ? v.duration : 0);
+      v.onerror = () => done(0);
+      setTimeout(() => done(0), 8000);
+      v.src = u;
+    });
+  }
+  async function doVideo(file, goal, pct, fm){
+    if (file.size > 600 * 1048576) throw new Error('Video is too large for the browser (over 600 MB). Try a smaller file.');
+    const f = await loadFFmpeg();
+    const { fetchFile } = FFmpegUtil;
+    const dur = await getDuration(file);
+    const inName = 'input.' + (ext(file.name) || 'mp4');
+    const outFile = 'out.' + fm, web = fm === 'webm';
+    let H = 480, rate;
+    if (dur > 0){
+      const vb = Math.max(40000, Math.floor(goal * 8 * 0.92 / dur - 48000));
+      H = vb < 150000 ? 240 : vb < 350000 ? 360 : vb < 900000 ? 480 : vb < 2500000 ? 720 : 1080;
+      rate = ['-b:v', Math.round(vb / 1000) + 'k', '-maxrate', Math.round(vb * 1.3 / 1000) + 'k', '-bufsize', Math.round(vb * 2 / 1000) + 'k'];
+    } else rate = web ? ['-crf', '40', '-b:v', '0'] : ['-crf', '36'];
+    const args = ['-i', inName,
+      ...(web ? ['-c:v', 'libvpx', '-deadline', 'realtime', '-cpu-used', '8', '-c:a', 'libvorbis']
+              : ['-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-movflags', '+faststart']),
+      ...rate, '-b:a', '48k', '-vf', 'scale=-2:min(ih\\,' + H + ')', '-y', outFile];
+    const onProg = ({ progress }) => setProg(progress * 100);
+    f.on('progress', onProg);
+    setStatus('Compressing video — this can take a few minutes. Keep this page open.');
+    setProg(1);
+    try {
+      await f.writeFile(inName, await fetchFile(file));
+      const code = await f.exec(args);
+      if (code !== 0) throw new Error('ffmpeg failed');
+      const data = await f.readFile(outFile);
+      await f.deleteFile(inName).catch(() => {}); await f.deleteFile(outFile).catch(() => {});
+      return { blob: new Blob([data.buffer], { type: web ? 'video/webm' : 'video/mp4' }), name: base(file.name) + '-compressed.' + fm };
+    } finally { f.off('progress', onProg); }
+  }
+
+  /* ---------- ZIP / OTHER (lossless recompress) ---------- */
+  const DEFLATE9 = { compression: 'DEFLATE', compressionOptions: { level: 9 } };
+  async function doZip(file){
+    await App.lib('jszip');
+    const src = await JSZip.loadAsync(file), out = new JSZip();
+    const entries = Object.values(src.files).filter(e => !e.dir);
+    let i = 0;
+    for (const e of entries){
+      out.file(e.name, await e.async('uint8array'), DEFLATE9);
+      setProg(++i / entries.length * 90); await tick();
+    }
+    const blob = await out.generateAsync({ type: 'blob', ...DEFLATE9 });
+    return { blob, name: base(file.name) + '-compressed.zip' };
+  }
+  async function doOther(file){
+    await App.lib('jszip');
+    const out = new JSZip(); out.file(file.name, file, DEFLATE9);
+    const blob = await out.generateAsync({ type: 'blob', ...DEFLATE9 }, m => setProg(m.percent));
+    return { blob, name: file.name + '.zip' };
+  }
+
+  /* ---------- flow ---------- */
+  function preview(el, file, blob, label){
+    el.innerHTML = '';
+    if (label === 'image'){
+      const im = document.createElement('img'); im.alt = ''; im.src = track(URL.createObjectURL(blob)); el.append(im);
+    } else {
+      const d = document.createElement('div'); d.className = 'ph';
+      d.textContent = (blob.type === 'application/pdf' ? 'PDF' : blob.type === 'video/mp4' ? 'MP4' : blob.type === 'application/zip' ? 'ZIP' : (ext(file.name) || 'FILE').toUpperCase());
+      el.append(d);
+    }
+  }
+
+  async function handle(file, fm){
+    if (!file || busy) return;
+    busy = true; reset(false);
+    const kind = kindOf(file), goal = $('target').value === 'custom' ? parseFloat($('custom').value) * 1024 : file.size * parseFloat($('target').value), pct = goal / file.size;
+    setProg(2); setStatus('Compressing…'); detail.textContent = '';
+    try {
+      let r;
+      if (kind === 'image') r = await doImage(file, goal, fm);
+      else if (kind === 'pdf') r = await doPdf(file, goal, fm);
+      else if (kind === 'video') r = await doVideo(file, goal, pct, fm);
+      else if (kind === 'zip') r = await doZip(file);
+      else r = await doOther(file);
+
+      outBlob = r.blob; outName = r.name;
+      const before = $('prevBefore'), after = $('prevAfter');
+      if (kind === 'image'){
+        before.innerHTML = ''; const im = document.createElement('img'); im.alt = ''; im.src = track(URL.createObjectURL(file)); before.append(im);
+        after.innerHTML = ''; const im2 = document.createElement('img'); im2.alt = ''; im2.src = track(URL.createObjectURL(r.blob)); after.append(im2);
+      } else {
+        for (const [el, b] of [[before, file], [after, r.blob]]){
+          el.innerHTML = ''; const d = document.createElement('div'); d.className = 'ph';
+          d.textContent = kind === 'other' && b === file ? (ext(file.name) || 'FILE').toUpperCase() : kind === 'other' ? 'ZIP' : kind.toUpperCase();
+          el.append(d);
+        }
+      }
+      $('szBefore').textContent = fmt(file.size); $('szAfter').textContent = fmt(r.blob.size);
+      const ratio = r.blob.size / file.size * 100;
+      summary.className = 'summary';
+      if (r.blob.size >= file.size){
+        summary.classList.add('warn');
+        summary.textContent = 'This file is already compressed — the result is not smaller than the original. Keep the original.';
+      } else if (r.blob.size <= goal * 1.08){
+        summary.textContent = 'Reduced to ' + ratio.toFixed(1) + '% of the original (' + (100 - ratio).toFixed(1) + '% smaller).';
+      } else {
+        summary.classList.add('warn');
+        summary.textContent = 'Reduced to ' + ratio.toFixed(1) + '% of the original, but could not reach the ' + Math.round(pct * 100) + '% target.';
+        detail.textContent = (kind === 'zip' || kind === 'other')
+          ? 'Lossless compression cannot go further for this type of file. Contents that are already compressed (photos, videos, archives) will not shrink much.'
+          : 'Try the 25% or 50% target for a better quality result.';
+      }
+      iosHelp.hidden = !isIOS; work.hidden = false; setStatus(''); prog.hidden = true;
+    } catch (e){
+      console.error(e); prog.hidden = true;
+      const msg = e && e.message && !/^(decode|encode|ffmpeg failed)$/.test(e.message) ? e.message : '';
+      setStatus('Could not compress this file. ' + (msg || (kind === 'image' ? 'If it is a HEIC photo, open this page in Safari or choose a JPG/PNG.' : kind === 'video' ? 'Video compression needs a modern browser and enough memory; try a shorter or smaller video.' : 'Check your internet connection (needed to load tools) and try again.')), 'err');
+    } finally { busy = false; }
+  }
+
+  function reset(clearStatus = true){
+    urls.forEach(URL.revokeObjectURL); urls = []; outBlob = null; work.hidden = true;
+    if (clearStatus) setStatus('');
+  }
+
+  const saveOut = () => outBlob && App.save(outBlob, outName);
+
+  const FORMATS = {
+    image: [['jpg', 'JPG — smallest for photos'], ['webp', 'WebP — smaller than JPG'], ['png', 'PNG — sharp edges, shrinks by resizing']],
+    video: [['mp4', 'MP4 — plays everywhere'], ['webm', 'WebM — web / Android']],
+    pdf: [['pdf', 'PDF'], ['jpgzip', 'JPG picture of each page (ZIP)']],
+    zip: [['zip', 'ZIP']], other: [['zip', 'ZIP (file packed inside)']]
+  };
+  let picked = null;
+  function pick(file){
+    if (!file || busy) return;
+    picked = file; reset();
+    const sel = $('fmt'); sel.innerHTML = '';
+    FORMATS[kindOf(file)].forEach(([v, t]) => sel.add(new Option(t, v)));
+    sel.disabled = sel.options.length < 2;
+    $('chosen').textContent = file.name + ' · ' + fmt(file.size); $('chosen').hidden = false; $('go').hidden = false;
+  }
+  $('target').onchange = () => { $('custom').hidden = $('target').value !== 'custom'; };
+  $('go').onclick = () => {
+    if ($('target').value === 'custom' && !(parseFloat($('custom').value) > 0)){ setStatus('Type the size you want, in KB.', 'err'); return; }
+    if (picked) handle(picked, $('fmt').value);
+  };
+  input.addEventListener('change', e => { pick(e.target.files[0]); input.value = ''; });
+  ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', e => pick(e.dataTransfer.files[0]));
+  $('save').onclick = saveOut;
+  $('alt').onclick = () => {
+    if (!outBlob) return;
+    const u = URL.createObjectURL(new Blob([outBlob], { type: 'application/octet-stream' }));
+    if (!window.open(u, '_blank')) window.location.href = u;
+    setTimeout(() => URL.revokeObjectURL(u), 120000);
+  };
+  $('again').onclick = () => { reset(); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+})();
+</script>
+</body>
+</html>

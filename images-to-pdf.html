@@ -1,0 +1,30 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#0a1226"><meta name="description" content="Turn photos or scans into one PDF for forms, applications and email."><title>Photos to PDF · Drevia Infotech</title><link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="app.css"></head><body><main id="app"></main><script src="connection.js"></script><script src="app.js"></script><script>const $=App.$;
+App.init({title:'Photos to PDF',
+sub:'Turn photos or scans into one PDF — ready for forms, applications and email. Use the arrows to set page order. Nothing is uploaded.',
+hint:'JPG, PNG, WebP, HEIC (Safari)',accept:'image/*,.heic,.heif',multiple:true,
+test:f=>f.type.startsWith('image/')||/\.(heic|heif)$/i.test(f.name),action:'Create PDF',
+options:`<label>Page size<select id="size"><option value="a4">A4</option><option value="letter">US Letter</option><option value="fit">Same as photo</option></select></label>
+<label>Margin<select id="margin"><option value="0">None</option><option value="24" selected>Small</option><option value="48">Large</option></select></label>
+<label>Quality<select id="q"><option value="0.9|3000">High</option><option value="0.75|2200" selected>Medium</option><option value="0.5|1500">Small file</option></select></label>
+<label>PDF name<input id="name" value="photos" autocomplete="off"></label>`,
+note:'Each photo becomes one page, in the order shown. Choose "Small file" if the PDF must stay under an upload limit.',
+run:async(files,{status,progress})=>{
+  await App.lib('jspdf');
+  const {jsPDF}=window.jspdf,size=$('size').value,mg=+$('margin').value,[q,maxS]=$('q').value.split('|').map(Number);
+  let doc=null;
+  for(let i=0;i<files.length;i++){
+    status('Adding photo '+(i+1)+' of '+files.length+'…');progress(i/files.length*100);
+    const im=await App.loadImage(files[i]),s=Math.min(1,maxS/Math.max(im.naturalWidth,im.naturalHeight));
+    const w=Math.round(im.naturalWidth*s),h=Math.round(im.naturalHeight*s),cv=document.createElement('canvas');
+    cv.width=w;cv.height=h;const x=cv.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,w,h);x.drawImage(im,0,0,w,h);
+    const data=cv.toDataURL('image/jpeg',q);cv.width=cv.height=0;
+    let pw,ph;
+    if(size==='fit'){pw=w*.75;ph=h*.75}else{[pw,ph]=size==='a4'?[595.28,841.89]:[612,792];if(w>h)[pw,ph]=[ph,pw]}
+    const o=pw>ph?'l':'p',m=size==='fit'?0:mg,r=Math.min((pw-2*m)/w,(ph-2*m)/h);
+    if(!doc)doc=new jsPDF({orientation:o,unit:'pt',format:[pw,ph],compress:true});else doc.addPage([pw,ph],o);
+    doc.addImage(data,'JPEG',(pw-w*r)/2,(ph-h*r)/2,w*r,h*r);await App.tick();
+  }
+  const blob=doc.output('blob'),name=App.safe($('name').value,'photos')+'.pdf';
+  return{blob,name,summary:files.length+' page'+(files.length>1?'s':'')+' · '+App.fmt(blob.size)+' — '+name};
+}});
+</script></body></html>

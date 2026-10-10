@@ -1,0 +1,35 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#0a1226"><meta name="description" content="Resize photos to exact pixels and a maximum KB size for forms and exams."><title>Resize Photo · Drevia Infotech</title><link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="app.css"></head><body><main id="app"></main><script src="connection.js"></script><script src="app.js"></script><script>const $=App.$;
+App.init({title:'Resize Photo for Forms',
+sub:'Set the exact pixel size and the maximum file size (KB) that exam, job and government forms ask for. Nothing is uploaded.',
+hint:'JPG, PNG, WebP, HEIC (Safari)',accept:'image/*,.heic,.heif',multiple:false,
+test:f=>f.type.startsWith('image/')||/\.(heic|heif)$/i.test(f.name),action:'Resize photo',
+options:`<label>Preset<select id="preset"><option value="">Custom size</option><option value="413,531">Passport photo 35×45 mm</option><option value="200,230">Exam form photo 200×230</option><option value="140,60">Signature 140×60</option><option value="500,500">Profile picture 500×500</option><option value="1080,1080">Social post 1080×1080</option></select></label>
+<label>Width (px)<input id="w" type="number" inputmode="numeric" min="1" max="8000" value="413"></label>
+<label>Height (px)<input id="h" type="number" inputmode="numeric" min="1" max="8000" value="531"></label>
+<label>Fit<select id="mode"><option value="crop">Crop to fill</option><option value="pad">Keep whole photo (white borders)</option><option value="stretch">Stretch</option></select></label>
+<label>Max file size in KB (optional)<input id="kb" type="number" inputmode="numeric" min="1" placeholder="e.g. 50"></label>
+<label>Download as<select id="fm"><option value="jpg">JPG</option><option value="png">PNG</option><option value="webp">WebP</option></select></label>`,
+note:'The size limit works with JPG and WebP. PNG cannot be shrunk by quality, so pick JPG when a form asks for a KB limit.',
+run:async(files,{status,progress})=>{
+  const f=files[0],W=Math.round(+$('w').value),H=Math.round(+$('h').value),fm=$('fm').value,mode=$('mode').value,lim=(parseFloat($('kb').value)||0)*1024;
+  if(!(W>0&&H>0&&W<=8000&&H<=8000))throw new Error('Enter a width and height between 1 and 8000 pixels.');
+  const im=await App.loadImage(f),iw=im.naturalWidth,ih=im.naturalHeight,c=document.createElement('canvas');
+  c.width=W;c.height=H;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,W,H);x.imageSmoothingQuality='high';
+  if(mode==='stretch')x.drawImage(im,0,0,W,H);
+  else{const r=mode==='crop'?Math.max(W/iw,H/ih):Math.min(W/iw,H/ih),dw=iw*r,dh=ih*r;x.drawImage(im,(W-dw)/2,(H-dh)/2,dw,dh)}
+  const mime={jpg:'image/jpeg',png:'image/png',webp:'image/webp'}[fm],enc=q=>new Promise(r=>c.toBlob(r,mime,q));
+  let b=await enc(.92),note='';
+  if(!b||b.type!==mime)throw new Error('This browser cannot save '+fm.toUpperCase()+' files. Choose JPG.');
+  if(lim&&b.size>lim){
+    if(fm==='png')note=' PNG cannot reach a size limit — choose JPG or WebP.';
+    else{
+      let lo=.02,hi=.92,best=await enc(lo);
+      if(best.size>lim)note=' Could not get under '+App.fmt(lim)+' at this pixel size — try smaller dimensions.';
+      else for(let i=0;i<8;i++){const m=(lo+hi)/2,t=await enc(m);if(t.size<=lim){best=t;lo=m}else hi=m}
+      b=best;
+    }
+  }
+  return{blob:b,name:App.base(f.name)+'-'+W+'x'+H+'.'+fm,summary:W+' × '+H+' px · '+App.fmt(b.size)+(lim&&b.size<=lim?' — within your '+App.fmt(lim)+' limit.':'')+note};
+}});
+$('preset').onchange=e=>{if(e.target.value){const [w,h]=e.target.value.split(',');$('w').value=w;$('h').value=h}};
+</script></body></html>

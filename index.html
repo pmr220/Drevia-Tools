@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#07152b"><meta name="description" content="Drevia Infotech makes everyday digital tasks simple: PDF editing, OCR, QR codes, photo tools, signatures, invoices and more.">
+<title>Drevia Infotech · Everyday Tools, Made Simple</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="manifest" href="manifest.webmanifest"><link rel="stylesheet" href="app.css"><link rel="stylesheet" href="advanced.css">
+</head>
+<body>
+<main id="app"></main>
+<script src="connection.js"></script><script src="app.js"></script>
+<script>
+const app=document.getElementById('app');
+app.innerHTML=`
+<section class="hero home-hero"><div class="wrap hero-layout">
+  <div class="hero-copy"><span class="chip">✦ A practical toolkit by Drevia Infotech</span>
+  <h1>Powerful tools.<br><span>Less everyday work.</span></h1>
+  <p>Brand your invoices, edit PDFs, clean up images and work through files in batches. Find the right tool, finish the job and save your result.</p>
+  <div class="hero-ctas"><a class="cta" href="#home-tools">Explore all tools <span aria-hidden="true">↓</span></a><span class="privacy-hint"><span class="privacy-dot"></span> Designed for privacy · Mobile-first</span></div></div>
+  <div class="hero-art" aria-hidden="true"><div class="orb orb-one"></div><div class="orb orb-two"></div><div class="hero-card hc-main"><span class="hc-icon">✦</span><b>Your digital toolkit</b><span>One simple place</span><div class="hc-lines"><i></i><i></i><i></i></div></div><div class="hero-card hc-float"><span>✓</span><div><b>Ready to save</b><small>Files you control</small></div></div><div class="hero-stat"><strong>${App.TOOLS.length}</strong><span>useful tools<br>and growing</span></div></div>
+</div></section>
+<div class="directory-stat">${App.TOOLS.length} tools · No account · No database · Clear local/server processing</div>
+<div class="wrap feature-row"><a href="invoice-maker.html">Invoice Studio<small>4 templates. Your brand.</small></a><a href="watermark-cleanup.html">Watermark Cleanup<small>Selected-area filling. No crop.</small></a><a href="pdf-editor.html">PDF Editor<small>Annotate, sign and redact.</small></a><a href="batch-image.html">Batch Image Studio<small>Convert up to 30 at once.</small></a></div>
+<section class="home-tools sec" id="home-tools"><div class="wrap">
+ <div class="section-heading"><div><span class="eyebrow">THE TOOLKIT</span><h2>What do you need to do?</h2><p>Choose a tool and get straight to the result.</p></div><span class="tool-count" id="toolCount">${App.TOOLS.length} tools</span></div>
+ <div class="tool-search"><span aria-hidden="true">⌕</span><input id="toolSearch" type="search" placeholder="Search tools — e.g. sign a PDF, make a QR code…" autocomplete="off" aria-label="Search tools"><button id="clearSearch" type="button" hidden>Clear</button></div>
+ <div class="filters" role="group" aria-label="Filter tools"><button class="filter active" data-filter="All">All tools</button><button class="filter" data-filter="Documents">Documents</button><button class="filter" data-filter="Images">Photos & images</button><button class="filter" data-filter="Files">File tools</button><button class="filter" data-filter="Media">Media</button><button class="filter" data-filter="Everyday">Everyday</button><button class="filter" data-filter="Work">Work</button></div>
+ <div class="grid tool-grid" id="toolGrid"></div><div id="noTools" class="no-tools" hidden>No matching tools. Try another search.</div>
+</div></section>
+<section class="sec trust-section"><div class="wrap"><div class="section-heading"><div><span class="eyebrow">BUILT AROUND YOU</span><h2>Simple to use. Careful with your files.</h2><p>Useful features without forcing you to create an account or learn complicated software.</p></div></div>
+<div class="trust-grid"><article><span class="trust-icon">⌁</span><h3>Made for phones first</h3><p>Designed for touch, readable controls and saving files on iPhone, Android and Windows.</p></article><article><span class="trust-icon">◇</span><h3>No account needed</h3><p>Most tools process files in your browser. OCR runs in server memory. Cleanup and link downloads use temporary files, deleted after the job.</p></article><article><span class="trust-icon">↗</span><h3>Ready to share</h3><p>Download the result or use your device’s supported sharing options for email, messaging and other apps.</p></article></div>
+</div></section>
+<section class="bottom-cta"><div class="wrap"><div><span class="eyebrow">DREVIA INFOTECH</span><h2>Less friction. More done.</h2><p>A growing collection of simple tools for everyday digital tasks.</p></div><a class="cta" href="#home-tools">Find a tool <span aria-hidden="true">↑</span></a></div></section>`;
+const grid=document.getElementById('toolGrid'),search=document.getElementById('toolSearch'),clear=document.getElementById('clearSearch'),count=document.getElementById('toolCount'),none=document.getElementById('noTools');let active='All';
+function draw(){const q=search.value.trim().toLowerCase();const tools=App.TOOLS.filter(t=>(active==='All'||t[5]===active)&&(!q||(t[3]+' '+t[4]+' '+t[1]+' '+t[5]).toLowerCase().includes(q)));grid.innerHTML=tools.map(t=>`<a class="tc tool-card ${App.TOOLS.indexOf(t)<6?'featured':''}" href="${t[0]}"><div class="tool-card-top"><span class="ico">${t[2]}</span><span class="card-arrow" aria-hidden="true">↗</span></div><span class="card-category">${t[5]}</span><h3>${t[3]}</h3><p>${t[4]}</p><span class="go">Open tool <span aria-hidden="true">→</span></span></a>`).join('');count.textContent=tools.length+' '+(tools.length===1?'tool':'tools');none.hidden=tools.length!==0;clear.hidden=!search.value;}
+draw();search.addEventListener('input',draw);clear.addEventListener('click',()=>{search.value='';draw();search.focus()});document.querySelectorAll('.filter').forEach(b=>b.addEventListener('click',()=>{active=b.dataset.filter;document.querySelectorAll('.filter').forEach(x=>x.classList.toggle('active',x===b));draw()}));
+</script>
+</body></html>

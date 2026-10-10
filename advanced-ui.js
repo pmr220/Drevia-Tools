@@ -1,0 +1,11 @@
+'use strict';
+window.AdvancedUI=(()=>{
+ const $=id=>document.getElementById(id);let blob=null,name='',busy=false;
+ function status(text){$('status').textContent=text;}
+ function offer(value,filename){blob=value;name=filename;$('result').hidden=false;$('resultName').textContent=name+' · '+App.fmt(blob.size);}
+ if($('saveResult'))$('saveResult').onclick=()=>blob&&App.save(blob,name);
+ async function task(fn){if(busy)return;busy=true;const controls=[...document.querySelectorAll('button,input,select')].filter(x=>!x.disabled);controls.forEach(x=>x.disabled=true);$('result').hidden=true;status('Working… Keep this page open.');try{await fn();status('Ready. Inspect the result before sharing.');}catch(e){status(e.message||'Processing failed.');}finally{busy=false;controls.forEach(x=>x.disabled=false);}}
+ async function post(route,body,json=false){const env=DreviaConnection.environmentError();if(env)throw Error(env);const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),250000);try{let r;try{r=await fetch(new URL('api/media/'+route,DreviaConnection.base),{method:'POST',headers:{'X-Drevia-Client':'web',...(json?{'Content-Type':'application/json'}:{})},body:json?JSON.stringify(body):body,signal:controller.signal});}catch(e){throw Error(e.name==='AbortError'?'The job took too long. Try a shorter clip or smaller file.':'Cannot reach the processing server. Open Connection check and verify that Node is running.');}if(!r.ok){let d;try{d=await r.json();}catch(_){throw Error('The server returned an unexpected page. Check the deployment settings.');}throw Error(d.error||'Processing failed.');}if(r.headers.get('content-type')?.includes('text/html'))throw Error('The API returned HTML. Check the backend route.');const name=(r.headers.get('content-disposition')?.match(/filename="?([^";]+)/)||[])[1]||'result';return {blob:await r.blob(),name};}finally{clearTimeout(timer);}}
+ async function capability(kind){try{const d=await DreviaConnection.request('api/media/capabilities',{timeout:20000});$('capability').textContent=d[kind]?'Processing engine ready':'Advanced setup required — run SETUP-ADVANCED-WINDOWS.cmd';return d;}catch(e){$('capability').textContent=e.message;return {};}}
+ return {$,status,offer,task,post,capability,isBusy:()=>busy};
+})();

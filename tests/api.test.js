@@ -1,0 +1,17 @@
+'use strict';
+const {test,before,after}=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
+const {app,shutdown}=require('../server');
+let server,base;
+before(async()=>{server=await new Promise(resolve=>{const s=app.listen(0,'127.0.0.1',()=>resolve(s));});base=`http://127.0.0.1:${server.address().port}`;});
+after(async()=>{await shutdown();await new Promise(resolve=>server.close(resolve));});
+test('health reports all shipped assets and both language packs',async()=>{const r=await fetch(base+'/api/health');const h=await r.json();assert.equal(h.version,require('../package.json').version);assert.deepEqual(h.missingAssets,[]);assert.equal(h.ocrLanguages.english,true);assert.equal(h.ocrLanguages.hindi,true);assert.equal(r.headers.get('cache-control'),'no-store');});
+test('server and setup files are not publicly exposed',async()=>{for(const p of ['server.js','package.json','package-lock.json','tests/api.test.js','START-WINDOWS.cmd','tessdata/eng.traineddata','node_modules/qrcode/package.json'])assert.equal((await fetch(base+'/'+p)).status,404,p);});
+test('unknown API returns JSON instead of a homepage',async()=>{const r=await fetch(base+'/api/missing');assert.equal(r.status,404);assert.match(r.headers.get('content-type'),/json/);});
+test('all pages and critical local libraries return correct content',async()=>{for(const file of fs.readdirSync(path.join(__dirname,'..')).filter(p=>/\.(html|css|js)$/.test(p)&&p!=='server.js').concat(['lib/qrcode.min.js','lib/pdf.worker.min.js','lib/ffmpeg-core.wasm'])){const r=await fetch(base+'/'+file);assert.equal(r.status,200,file);if(file.startsWith('lib/'))assert.doesNotMatch(r.headers.get('content-type'),/html/);await r.arrayBuffer();}});
+test('API QR returns PNG and SVG',async()=>{for(const format of ['png','svg']){const r=await fetch(base+'/api/qr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({payload:'https://example.com',format})});assert.equal(r.status,200);assert.match(r.headers.get('content-type'),format==='png'?/image\/png/:/image\/svg/);}});
+test('real English OCR produces text and searchable PDF',{timeout:150000},async()=>{const f=new FormData();f.append('language','eng');f.append('image',new Blob([fs.readFileSync(path.join(__dirname,'english.png'))],{type:'image/png'}),'sample.png');const r=await fetch(base+'/api/ocr',{method:'POST',body:f});const d=await r.json();assert.equal(r.status,200,JSON.stringify(d));assert.match(d.text,/DREVIA/);assert.match(d.text,/12345/);assert.ok(Buffer.from(d.pdf,'base64').subarray(0,5).equals(Buffer.from('%PDF-')));});
+test('real Hindi OCR recognizes the bundled language sample',{timeout:150000},async()=>{const f=new FormData();f.append('language','hin');f.append('image',new Blob([fs.readFileSync(path.join(__dirname,'hindi.png'))],{type:'image/png'}),'sample.png');const r=await fetch(base+'/api/ocr',{method:'POST',body:f});const d=await r.json();assert.equal(r.status,200,JSON.stringify(d));assert.match(d.text,/भारत/);});
+test('invalid image returns an error and does not crash the server',async()=>{const f=new FormData();f.append('image',new Blob(['not an image'],{type:'image/png'}),'bad.png');const r=await fetch(base+'/api/ocr',{method:'POST',body:f});assert.ok(r.status>=400);assert.equal((await fetch(base+'/api/health')).status,200);});

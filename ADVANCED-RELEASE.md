@@ -1,0 +1,1 @@
+Version 3.1.0: 20 tools total; adds Private File Pack, Duplicate & Integrity Check, PDF Booklet Arranger and Photo Contact Sheet. Invoice discounts support amount or percentage, quantity/rate arrows step by one and line items have units. See README.md for setup and VERIFICATION-3.1.md for tested scope and known limits.
